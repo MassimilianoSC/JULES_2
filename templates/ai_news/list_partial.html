@@ -1,0 +1,15 @@
+<div id="ai-news-list" class="grid gap-4 mt-6"
+     hx-get="/ai-news/list/partial" {# This defines how the element can be refreshed if targeted by HTMX #}
+     hx-swap="outerHTML"> {# The WebSocket handler will now trigger the refresh using this URL and swap method #}
+  <ul class="list-none p-0">
+    {% for d in ai_news %}
+      <li>
+        {% set user = current_user %}
+        {% include "ai_news/row_partial.html" %}
+      </li>
+    {% endfor %}
+  </ul>
+  {% if not ai_news %}
+    <div class="text-gray-500 text-sm px-4 py-2">Nessuna news disponibile.</div>
+  {% endif %}
+</div> 

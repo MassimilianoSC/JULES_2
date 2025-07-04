@@ -1,0 +1,12 @@
+<div id="nav-news-badge-container">
+    {% if unread_news_count %}
+    <span id="nav-news-badge"
+          hx-get="/notifiche/count/news"
+          hx-trigger="notifications.refresh from:body"
+          hx-credentials="include"
+          hx-swap="innerHTML"
+          class="absolute -top-2 -right-2 bg-red-500 text-white text-xs font-bold rounded-full w-5 h-5 flex items-center justify-center">
+        {{ unread_news_count }}
+    </span>
+    {% endif %}
+</div>

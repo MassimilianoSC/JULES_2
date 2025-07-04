@@ -1,0 +1,45 @@
+{% set page_size = 5 %}
+{% set total_comments = messages|length %}
+
+<div id="comments-container-{{ news_id }}" class="space-y-4">
+  {% for msg in messages %}
+    {# Passiamo msg come 'comment' al partial _comment_item.html
+       Assicurati che user e news_id siano disponibili nel contesto di questo include.
+       Se 'user' è l'utente loggato, è probabilmente già globale.
+       'news_id' è già disponibile in questo template.
+    #}
+    {% include "ai_news/_comment_item.html" with context comment=msg news_id=news_id user=user %}
+  {% endfor %}
+</div>
+<!-- Indicatore di digitazione -->
+<div id="typing-indicator-{{ news_id }}" class="ml-4"></div>
+
+{% if total_comments == page_size %}
+<div class="text-center py-4" id="load-more-{{ news_id }}" hx-swap-oob="true">
+  <button 
+    class="load-more-btn px-4 py-2 text-sm font-medium text-blue-600 hover:text-blue-800 focus:outline-none focus:ring-2 focus:ring-blue-500"
+    hx-get="/api/ai-news/{{ news_id }}/comments?page=2"
+    hx-target="#comments-container-{{ news_id }}"
+    hx-swap="beforeend"
+    hx-trigger="click"
+    hx-indicator="#loading-indicator-{{ news_id }}"
+    data-page="2"
+    _="on htmx:afterRequest 
+       if event.detail.successful
+         set my dataset.page to (parseInt(my dataset.page) + 1)
+         set my @hx-get to '/api/ai-news/{{ news_id }}/comments?page=' + my dataset.page">
+    <span class="flex items-center gap-2">
+      <span>Carica altri commenti</span>
+      <svg class="w-4 h-4 animate-spin hidden" id="loading-indicator-{{ news_id }}" viewBox="0 0 24 24">
+        <circle class="opacity-25" cx="12" cy="12" r="10" stroke="currentColor" stroke-width="4"></circle>
+        <path class="opacity-75" fill="currentColor" d="M4 12a8 8 0 018-8V0C5.373 0 0 5.373 0 12h4zm2 5.291A7.962 7.962 0 014 12H0c0 3.042 1.135 5.824 3 7.938l3-2.647z"></path>
+      </svg>
+    </span>
+  </button>
+</div>
+{% endif %}
+
+<script>
+    window.currentUserId = "{{ user._id }}";
+    window.currentUserName = "{{ user.name }}";
+</script> 

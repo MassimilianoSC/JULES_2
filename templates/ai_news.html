@@ -1,0 +1,102 @@
+{% extends "base.html" %}
+
+{% block head %}
+  {{ super() }}
+  <link rel="stylesheet" href="https://cdnjs.cloudflare.com/ajax/libs/font-awesome/6.5.1/css/all.min.css">
+  <link rel="stylesheet" href="/static/css/ai_news_layout.css">
+  <script type="module" src="/static/js/features/ai-news/index.js"></script>
+  <script type="module" src="/static/js/features/ai-news/analytics/index.js"></script>
+  <link href="/static/css/features/ai-news/chat-styles.css" rel="stylesheet">
+{% endblock %}
+
+{% block content %}
+<div class="container mx-auto px-4 pb-32 ai-news-page">  {# Spazio per navbar #}
+  <div class="flex flex-col lg:flex-row gap-8">
+    
+    {# Colonna principale con sezioni tematiche #}
+    <div class="lg:w-3/4">
+      <div class="flex justify-between items-center mb-6">
+        <h1 class="text-2xl font-bold">News AI</h1>
+        {% if user.role == 'admin' %}
+        <a href="/ai-news/new" class="btn btn-primary"> {# Corrected href to point to the new GET route #}
+          <i class="fas fa-plus mr-2"></i>Nuova News
+        </a>
+        {% endif %}
+      </div>
+
+      {# Sezioni tematiche #}
+      {% set category_labels = {
+        'AI': 'Intelligenza Artificiale',
+        'ML': 'Machine Learning',
+        'DL': 'Deep Learning',
+        'NLP': 'Natural Language Processing',
+        'CV': 'Computer Vision',
+        'OTHER': 'Altro'
+      } %}
+      {% for key, label in category_labels.items() %}
+      <div class="mb-8">
+        <h2 class="text-xl font-semibold mb-4">{{ label }}</h2>
+        <div class="space-y-4">
+          {% set found = false %}
+          {% for news in ai_news %}
+            {% if news.category == key %}
+              {% set found = true %}
+              {% with d=news, new_doc_ids=new_doc_ids %}
+                {% include "ai_news/row_partial.html" %}
+              {% endwith %}
+            {% endif %}
+          {% endfor %}
+          {% if not found %}
+            <p class="text-gray-400 italic">Nessuna news in questa categoria.</p>
+          {% endif %}
+        </div>
+      </div>
+      {% endfor %}
+    </div>
+
+    {# Sidebar con statistiche #}
+    <div class="lg:w-1/4 space-y-6">
+      <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-lg font-semibold mb-4">Statistiche Globali</h2>
+        <div class="space-y-4">
+          <div class="flex justify-between items-center">
+            <span>Totale News:</span>
+            <span class="font-semibold">{{ ai_news|length }}</span>
+          </div>
+          <div class="flex justify-between items-center">
+            <span>Interazioni Totali:</span>
+            <span class="font-semibold" id="total-interactions">0</span>
+          </div>
+        </div>
+      </div>
+
+      {# Filtri #}
+      <div class="bg-white rounded-lg shadow p-6">
+        <h2 class="text-lg font-semibold mb-4">Filtri</h2>
+        <div class="space-y-4">
+          <select class="w-full" id="category-filter" data-category-filter>
+            <option value="">Tutte le categorie</option>
+            {% for key, label in category_labels.items() %}
+            <option value="{{ key }}">{{ label }}</option>
+            {% endfor %}
+          </select>
+        </div>
+      </div>
+    </div>
+  </div>
+</div>
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    fetch('/notifiche/mark-read/ai_news', {method: 'POST', credentials: 'include'})
+      .then(() => {
+        if (window.htmx) {
+          htmx.trigger(document.body, 'notifications.refresh');
+        }
+      });
+  });
+</script>
+{% endblock %}

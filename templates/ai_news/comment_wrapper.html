@@ -1,0 +1,10 @@
+{# 
+  Template wrapper per i commenti.
+  Questo template ora delega il rendering del singolo item a _comment_item.html
+  
+  Parametri richiesti:
+  - comment: il commento da renderizzare
+  - user: l'utente corrente
+  - news_id: l'ID della news a cui il commento appartiene (necessario per _comment_item)
+#}
+{% include "ai_news/_comment_item.html" with context %}

@@ -1,0 +1,37 @@
+{% extends "base.html" %}
+{% import "components/crud_base.html" as crud %}
+{% import "news/news_row_partial.html" as row %}
+
+{% block content %}
+  {{ crud.crud_page(
+       "News",
+       "/news/new",
+       "news-list",
+       row.news_row,          
+       news,
+       current_user
+  ) }}
+{% endblock %}
+
+{% block scripts %}
+{{ super() }}
+<!-- Script inline rimosso. La gestione dell'eliminazione è in news-delete.js -->
+<!-- Le conferme admin sono gestite globalmente da ui.js -->
+<!-- Il badge delle notifiche viene aggiornato tramite l'evento notifications.refresh -->
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    fetch('/notifiche/mark-read/news', {method: 'POST', credentials: 'include'})
+      .then(() => {
+        if (window.htmx) {
+          htmx.trigger(document.body, 'notifications.refresh');
+          // Se esiste un badge specifico per le news, triggerare anche quello
+          // htmx.trigger(document.body, 'refreshNewsBadgeEvent');
+        }
+      });
+  });
+</script>
+<script type="module" src="{{ url_for('static', path='js/features/news-delete.js') }}"></script>
+{% endblock %}
+
+
+

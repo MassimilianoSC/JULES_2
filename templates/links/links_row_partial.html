@@ -1,0 +1,106 @@
+{% set user = user or current_user %}
+{% macro link_row(l, user=None) %}
+<tr id="link-{{ l._id|string }}">
+    <td class="px-6 py-4 whitespace-nowrap">
+        <div class="text-sm font-medium text-gray-900">{{ l.title }}</div>
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap">
+        <a href="{{ l.url }}" target="_blank" class="text-sm text-indigo-600 hover:text-indigo-900 hover:underline truncate" title="{{ l.url }}">
+            {{ l.url | truncate(50) }}
+            <svg xmlns="http://www.w3.org/2000/svg" class="h-4 w-4 inline-block ml-1" fill="none" viewBox="0 0 24 24" stroke="currentColor" stroke-width="2">
+              <path stroke-linecap="round" stroke-linejoin="round" d="M10 6H6a2 2 0 00-2 2v10a2 2 0 002 2h10a2 2 0 002-2v-4M14 4h6m0 0v6m0-6L10 14" />
+            </svg>
+        </a>
+    </td>
+    <td class="px-6 py-4 whitespace-nowrap text-right text-sm font-medium space-x-4">
+        {% if user.role == 'admin' %}
+            <button 
+                hx-get="/links/{{ l._id|string }}/edit/partial"
+                hx-target="#modal-body"
+                hx-swap="innerHTML"
+                class="text-indigo-600 hover:text-indigo-900">
+                Modifica
+            </button>
+            <button 
+                type="button"
+                data-delete-url="/links/{{ l._id|string }}"
+                data-link-id="{{ l._id|string }}"
+                class="text-red-600 hover:text-red-900">
+                Elimina
+            </button>
+        {% endif %}
+    </td>
+</tr>
+{% endmacro %}
+
+<script type="module">
+  import { eventBus } from '/static/js/core/event-bus.js';
+  
+  document.addEventListener('click', e => {
+    const deleteBtn = e.target.closest('[data-delete-url]');
+    
+    if (deleteBtn) {
+      e.preventDefault();
+      const url = deleteBtn.dataset.deleteUrl;
+      const linkId = deleteBtn.dataset.linkId;
+      const linkElement = document.querySelector(`#link-${linkId}`);
+      
+      Swal.fire({
+        title: 'Sei sicuro?',
+        text: 'Questa azione non può essere annullata',
+        icon: 'warning',
+        showCancelButton: true,
+        confirmButtonText: 'Sì, elimina',
+        cancelButtonText: 'Annulla',
+        reverseButtons: true
+      }).then((result) => {
+        if (result.isConfirmed) {
+          fetch(url, {
+            method: 'DELETE',
+            headers: {
+              'HX-Request': 'true'
+            }
+          }).then(async response => {
+            if (response.ok) {
+              // Rimuoviamo l'elemento dalla UI e emettiamo l'evento
+              if (linkElement) {
+                linkElement.remove();
+                eventBus.emit('resource/delete', {
+                  type: 'link',
+                  id: linkId
+                });
+              }
+
+              // Gestiamo il trigger per la conferma admin
+              const triggerHeader = response.headers.get('HX-Trigger');
+              console.log('[DEBUG] HX-Trigger header ricevuto:', triggerHeader);
+              
+              if (triggerHeader) {
+                try {
+                  const triggerData = JSON.parse(triggerHeader);
+                  console.log('[DEBUG] Trigger data parsato:', triggerData);
+                  if (triggerData.showAdminConfirmation) {
+                    const conf = triggerData.showAdminConfirmation;
+                    console.log('[DEBUG] Configurazione conferma admin:', conf);
+                    // Mostriamo il messaggio di conferma all'admin
+                    Swal.fire({
+                      title: conf.title,
+                      text: conf.message,
+                      icon: conf.level,
+                      timer: conf.duration,
+                      showConfirmButton: false
+                    });
+                  }
+                } catch (error) {
+                  console.error('[DEBUG] Errore parsing trigger data:', error);
+                }
+              }
+            }
+          }).catch(error => {
+            console.error('[DEBUG] Errore durante la chiamata DELETE:', error);
+          });
+        }
+      });
+    }
+  });
+</script>

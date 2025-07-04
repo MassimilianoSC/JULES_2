@@ -1,0 +1,399 @@
+{% set u           = request.state.user %}
+{% set pinned_json = request.session.get('pinned_items', []) | tojson %}
+{% set ts = datetime.utcnow().timestamp() %}
+
+{# Conteggio iniziale delle notifiche non lette per i link #}
+{% set unread_counts = getattr(request.state, 'unread_counts', {}) %}
+{% set unread_links_count = unread_counts.get('link', 0) if unread_counts else 0 %}
+
+<!DOCTYPE html>
+<html lang="it">
+<head>
+  <meta charset="UTF-8">
+  <meta name="viewport" content="width=device-width, initial-scale=1.0">
+  <title>{{ page_title or "HQ Engineering" }}</title>
+  
+  <!-- CSS -->
+  <link href="{{ url_for('static', path='css/hqe.bundle.css') }}" rel="stylesheet">
+  <link href="{{ url_for('static', path='tailwind.css') }}?v={{ ts }}" rel="stylesheet">
+  <link rel="stylesheet" href="https://cdn.jsdelivr.net/npm/toastify-js@1.12.0/src/toastify.css">
+  
+  <!-- Librerie JS Esterne -->
+  <script src="https://unpkg.com/htmx.org@1.9.12"></script>
+  <script defer src="https://unpkg.com/alpinejs@3.x.x/dist/cdn.min.js"></script>
+  <script src="https://cdn.jsdelivr.net/npm/sweetalert2@11"></script>
+
+  <!-- Core JS - PRIMA DI TUTTO -->
+  <script type="module" src="/static/js/core/bootstrap.js?v={{ ts }}"></script>
+  <script type="module" src="/static/js/core/cleanup.js?v={{ ts }}"></script>
+
+  <style>
+    [x-cloak] { display: none !important; }
+    html, body { height: 100%; margin: 0; padding: 0; background: none !important; }
+    .font-montserrat { font-family: 'Montserrat', Arial, sans-serif; }
+    .page-border-wrapper {
+      border: 10px solid #2563eb;
+      border-radius: 2.5rem;
+      box-sizing: border-box;
+      min-height: 100vh;
+      padding: 0;
+      background: transparent;
+      width: 100%;
+      max-width: 100vw;
+      margin: 0 auto;
+      position: relative;
+      overflow: hidden;
+    }
+    .page-bg {
+      background: #3b82f6 !important;
+      min-height: 100vh;
+      width: 100%;
+      border-radius: 2.5rem;
+    }
+  </style>
+
+  <link href="https://fonts.googleapis.com/css2?family=Montserrat:wght@700&display=swap" rel="stylesheet">
+
+  <!-- DEBUG - Pinned Items: {{ pinned_json }} -->
+
+  <script>
+  console.log('🔄 [DEBUG-LINK-FLOW] Inizio caricamento pagina');
+  
+  // Intercetta richieste HTTP prima di tutto
+  const originalFetch = window.fetch;
+  window.fetch = async function(...args) {
+      const url = args[0]?.url || args[0];
+      console.log('🌐 [DEBUG-LINK-FLOW] Richiesta fetch:', {
+          timestamp: new Date().toISOString(),
+          url: url,
+          options: args[1]
+      });
+      const response = await originalFetch.apply(this, args);
+      const clone = response.clone();
+      try {
+          const text = await clone.text();
+          console.log('🌐 [DEBUG-LINK-FLOW] Risposta fetch:', {
+              timestamp: new Date().toISOString(),
+              url: url,
+              status: response.status,
+              headers: Object.fromEntries(response.headers.entries()),
+              body: text.substring(0, 1000) + (text.length > 1000 ? '...' : '')
+          });
+      } catch (e) {
+          console.error('🔴 [DEBUG-LINK-FLOW] Errore lettura risposta fetch:', e);
+      }
+      return response;
+  };
+
+  // Intercetta XMLHttpRequest
+  const originalXHR = window.XMLHttpRequest;
+  window.XMLHttpRequest = function() {
+      const xhr = new originalXHR();
+      const originalOpen = xhr.open;
+      const originalSend = xhr.send;
+
+      xhr.open = function() {
+          console.log('🌐 [DEBUG-LINK-FLOW] Richiesta XHR:', {
+              timestamp: new Date().toISOString(),
+              method: arguments[0],
+              url: arguments[1]
+          });
+          return originalOpen.apply(this, arguments);
+      };
+
+      xhr.send = function() {
+          this.addEventListener('load', function() {
+              console.log('🌐 [DEBUG-LINK-FLOW] Risposta XHR:', {
+                  timestamp: new Date().toISOString(),
+                  url: this.responseURL,
+                  status: this.status,
+                  headers: this.getAllResponseHeaders(),
+                  body: this.responseText.substring(0, 1000) + (this.responseText.length > 1000 ? '...' : '')
+              });
+          });
+          return originalSend.apply(this, arguments);
+      };
+
+      return xhr;
+  };
+  </script>
+
+  {% block head %}{% endblock %}
+</head>
+
+<body hx-ext="morph" class="bg-slate-50 font-sans" data-user-role="{{ u.role if u else '' }}" data-user-id="{{ u._id|string if u else '' }}" data-pinned-items='{{ pinned_json|safe }}'>
+
+  <div id="ws-debugger"
+       class="fixed bottom-2.5 right-2.5 z-50 w-5 h-5 rounded-full border-2 border-black bg-gray-400"
+       title="WebSocket: in attesa…"></div>
+
+  <!-- HAMBURGER MENU in alto a destra -->
+  <div x-data="{ open: false }" class="fixed top-6 right-6 z-50">
+    <button @click="open = !open" class="bg-white/80 rounded-full p-2 shadow-lg hover:bg-blue-100 focus:outline-none">
+      <svg xmlns="http://www.w3.org/2000/svg" class="h-8 w-8 text-blue-900" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+        <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M4 6h16M4 12h16M4 18h16" />
+      </svg>
+    </button>
+    <!-- Overlay menu -->
+    <div x-show="open" @click.away="open = false" class="fixed inset-0 bg-black/40 flex items-start justify-end z-50" x-cloak>
+      <div class="bg-white rounded-l-2xl shadow-2xl mt-0 w-64 p-6 h-full flex flex-col">
+        <button @click="open = false" class="self-end mb-4 text-gray-500 hover:text-blue-700">
+          <svg xmlns="http://www.w3.org/2000/svg" class="h-6 w-6" fill="none" viewBox="0 0 24 24" stroke="currentColor">
+            <path stroke-linecap="round" stroke-linejoin="round" stroke-width="2" d="M6 18L18 6M6 6l12 12" />
+          </svg>
+        </button>
+        <nav class="flex flex-col gap-4 mt-4">
+          <a href="/me" class="text-blue-900 hover:text-blue-700 font-semibold">Profilo</a>
+          <a href="/me/password" class="text-blue-900 hover:text-blue-700 font-semibold">Cambia password</a>
+          <a href="/logout" class="text-blue-900 hover:text-blue-700 font-semibold">Logout</a>
+          <a href="https://www.hqe.it/" target="_blank" class="text-blue-900 hover:text-blue-700 font-semibold">Sito HQE</a>
+          {% if u and u.role == "admin" %}
+            <a href="/users" class="text-blue-900 hover:text-blue-700 font-semibold">Utenti</a>
+          {% endif %}
+        </nav>
+      </div>
+    </div>
+  </div>
+
+  <!-- Barra di navigazione in basso, visibile su tutte le pagine -->
+  <nav class="fixed bottom-4 left-1/2 -translate-x-1/2 z-50 bg-white/90 shadow-2xl rounded-2xl border-t border-gray-100 max-w-5xl w-full flex justify-between items-center px-10 py-3 gap-8">
+      <div class="w-full flex justify-between items-center gap-8">
+          <a href="/" class="flex flex-col items-center text-blue-800 hover:text-blue-600 flex-1 min-w-[64px]">
+              <!-- Home -->
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" class="mb-1">
+                <path d="M3 12L12 4l9 8" stroke="#2563eb" stroke-width="2" stroke-linecap="round"/>
+                <rect x="7" y="14" width="10" height="6" rx="2" fill="#fbbf24" stroke="#2563eb" stroke-width="2"/>
+              </svg>
+              <span class="text-[13px] leading-tight font-medium text-center">Home</span>
+          </a>
+          <a href="/messaggi" class="flex flex-col items-center text-blue-800 hover:text-blue-600 flex-1 min-w-[64px]">
+              <!-- Messaggi -->
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" class="mb-1">
+                <rect x="3" y="7" width="18" height="12" rx="3" fill="#e0f2fe" stroke="#2563eb" stroke-width="2"/>
+                <path d="M3 7l9 7 9-7" stroke="#22c55e" stroke-width="2"/>
+              </svg>
+              <span class="text-[13px] leading-tight font-medium text-center">Messaggi</span>
+          </a>
+          <a href="/news" class="group relative flex flex-col items-center text-purple-800 hover:text-purple-600 flex-1 min-w-[64px]">
+              <!-- News -->
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" class="mb-1">
+                <path d="M3 14V10a1 1 0 0 1 1-1h2l7-4v14l-7-4H4a1 1 0 0 1-1-1z" fill="#ede9fe" stroke="#a78bfa" stroke-width="2"/>
+                <path d="M21 12a3 3 0 0 0-3-3" stroke="#a78bfa" stroke-width="2" stroke-linecap="round"/>
+                <path d="M21 12a3 3 0 0 1-3 3" stroke="#a78bfa" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <span class="text-[13px] leading-tight font-medium text-center">News</span>
+              {% if u %}{% include "components/nav_news_badge.html" %}{% endif %}
+          </a>
+          <a href="/documents" class="group relative flex flex-col items-center text-blue-800 hover:text-blue-600 flex-1 min-w-[64px]">
+              <!-- Documenti -->
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" class="mb-1">
+                <rect x="5" y="3" width="14" height="18" rx="2" fill="#fbbf24" stroke="#2563eb" stroke-width="2"/>
+                <path d="M9 7h6M9 11h6M9 15h2" stroke="#2563eb" stroke-width="2"/>
+              </svg>
+              <span class="text-[13px] leading-tight font-medium text-center">Documenti</span>
+              {% include "components/nav_documenti_badge.html" %}
+          </a>
+          <a href="/contatti" class="group relative flex flex-col items-center text-blue-800 hover:text-blue-600 flex-1 min-w-[64px]">
+              <!-- Contatti -->
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" class="mb-1">
+                <circle cx="12" cy="9" r="4" fill="#a7f3d0" stroke="#2563eb" stroke-width="2"/>
+                <ellipse cx="12" cy="19" rx="7" ry="3" fill="#e0f2fe" stroke="#2563eb" stroke-width="2"/>
+              </svg>
+              <span class="text-[13px] leading-tight font-medium text-center">Contatti</span>
+              {% include "components/nav_contatti_badge.html" %}
+          </a>
+          <a href="/ai-news" class="group relative flex flex-col items-center text-blue-800 hover:text-blue-600 flex-1 min-w-[64px]">
+              <!-- AI News -->
+              <svg width="36" height="36" viewBox="0 0 24 24" fill="none" class="mb-1">
+                <rect x="2.5" y="9" width="2.8" height="6" rx="1.2" fill="#2563eb"/>
+                <rect x="18.7" y="9" width="2.8" height="6" rx="1.2" fill="#2563eb"/>
+                <rect x="5" y="4.5" width="14" height="13" rx="4" fill="#e0f2fe" stroke="#2563eb" stroke-width="2"/>
+                <circle cx="10" cy="11" r="1.4" fill="#2563eb"/>
+                <circle cx="14" cy="11" r="1.4" fill="#2563eb"/>
+                <rect x="10" y="15.2" width="4" height="1.4" rx="0.7" fill="#22c55e"/>
+                <rect x="11.2" y="2.5" width="1.6" height="2.5" rx="0.8" fill="#2563eb"/>
+                <circle cx="12" cy="2" r="0.9" fill="#2563eb"/>
+              </svg>
+              <span class="text-[13px] leading-tight font-medium text-center">News AI</span>
+              {% if u %}{% include "components/nav_ai_news_badge.html" %}{% endif %}
+          </a>
+          {% if u %}
+          <a href="/links" class="group relative flex flex-col items-center text-blue-800 hover:text-blue-600 flex-1 min-w-[64px]">
+              <!-- Link utili -->
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" class="mb-1">
+                <circle cx="12" cy="12" r="10" stroke="#2563eb" stroke-width="2" fill="#e0f2fe"/>
+                <path d="M2 12h20" stroke="#22c55e" stroke-width="2"/>
+                <path d="M12 2a15.3 15.3 0 0 1 0 20" stroke="#fbbf24" stroke-width="2"/>
+                <path d="M12 2a15.3 15.3 0 0 0 0 20" stroke="#f87171" stroke-width="2"/>
+              </svg>
+              <span class="text-[13px] leading-tight font-medium text-center">Link</span>
+               {% with unread_links_count=unread_links_count %}
+                 {% include "components/nav_links_badge.html" %}
+               {% endwith %}
+          </a>
+          {% endif %}
+          <a href="/organigramma" class="group flex flex-col items-center text-blue-800 hover:text-blue-600 flex-1 min-w-[64px]">
+              <!-- Organigramma -->
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" class="mb-1">
+                <rect x="3" y="3" width="18" height="18" rx="4" fill="#a7f3d0" stroke="#2563eb" stroke-width="2"/>
+                <path d="M7 8h10M7 12h10M7 16h10" stroke="#22c55e" stroke-width="2" stroke-linecap="round"/>
+              </svg>
+              <span class="text-[13px] leading-tight font-medium text-center">Organigramma<br>e procedure</span>
+          </a>
+          {% if u and u.role == "admin" %}
+          <a href="/soci" class="group flex flex-col items-center text-blue-800 hover:text-blue-600 flex-1 min-w-[64px]">
+              <!-- Icona Soci -->
+              <svg width="32" height="32" viewBox="0 0 24 24" fill="none" class="mb-1">
+                <circle cx="8" cy="10" r="3" fill="#a7f3d0" stroke="#2563eb" stroke-width="2"/>
+                <circle cx="16" cy="10" r="3" fill="#a7f3d0" stroke="#2563eb" stroke-width="2"/>
+                <ellipse cx="12" cy="18" rx="8" ry="4" fill="#e0f2fe" stroke="#2563eb" stroke-width="2"/>
+              </svg>
+              <span class="text-[13px] leading-tight font-medium text-center">Soci</span>
+          </a>
+          {% endif %}
+      </div>
+  </nav>
+
+  <div class="{% if request.path == '/' %}page-border-wrapper page-bg{% else %}page-content-wrapper{% endif %}">
+    {# {% include 'components/header.html' %} #}
+
+    {% block content %}{% endblock %}
+
+    <!-- Moduli delle singole feature -->
+    <script type="module" src="/static/js/features/notifications/index.js?v={{ ts }}"></script>
+    <script type="module" src="/static/js/features/highlights/ws.js?v={{ ts }}"></script>
+    <script type="module" src="/static/js/features/news-ticker/index.js?v={{ ts }}"></script>
+    <script type="module" src="/static/js/features/horizontal-scroll/index.js?v={{ ts }}"></script>
+    <script type="module" src="/static/js/features/animations/index.js?v={{ ts }}"></script>
+    <script type="module" src="/static/js/features/pinning/index.js?v={{ ts }}"></script>
+    <script type="module" src="/static/js/features/pinning/ws-handlers.js?v={{ ts }}"></script>
+
+    <script>
+      // Configurazione globale di HTMX e altre utility
+      htmx.config.withCredentials = true;
+
+      window.showDelete = function (btn) {
+        Swal.fire({
+          title: 'Sei sicuro?',
+          icon: 'warning',
+          showCancelButton: true,
+          confirmButtonText: 'Sì, elimina',
+          cancelButtonText: 'Annulla',
+        }).then(r => {
+          if (r.isConfirmed) btn.closest('form').requestSubmit();
+        });
+      };
+
+      // Listener per l'evento showSuccess
+      document.body.addEventListener('showSuccess', function (evt) {
+        const { title, message } = evt.detail;
+        if (title && message) {
+          Swal.fire({
+            title: title,
+            text: message,
+            icon: 'success',
+            timer: 3000,
+            timerProgressBar: true
+          });
+        }
+      });
+    </script>
+
+    <!-- Gestore conferme admin -->
+    <script>
+      document.body.addEventListener('showAdminConfirmation', (evt) => {
+        // evt.detail contiene il payload inviato da HX-Trigger
+        const { title, message, level = 'success', duration = 3000 } = evt.detail;
+        if (title && message) {
+          Swal.fire({
+            title: title,
+            text: message,
+            icon: level,
+            timer: duration,
+            timerProgressBar: true
+          });
+        }
+      });
+    </script>
+
+    <!-- Script di gestione delle modali -->
+    <script>
+      document.body.addEventListener('htmx:afterSwap', (e) => {
+        console.log('[DEBUG MODALE] htmx:afterSwap evento:', e);
+        console.log('[DEBUG MODALE] Target ID:', e.detail.target.id);
+        console.log('[DEBUG MODALE] Successful:', e.detail.successful);
+        
+        if (e.detail.target.id === 'modal-body' && e.detail.successful) {
+          const modalOverlay = document.getElementById('modal-overlay');
+          console.log('[DEBUG MODALE] Modal overlay trovato:', modalOverlay);
+          
+          if (modalOverlay) {
+            console.log('[DEBUG MODALE] Rimuovo classe hidden');
+            console.log('[DEBUG MODALE] Classi prima:', modalOverlay.className);
+            modalOverlay.classList.remove('hidden');
+            console.log('[DEBUG MODALE] Classi dopo:', modalOverlay.className);
+          }
+        }
+      });
+
+      // Chiusura modale
+      document.addEventListener('click', (e) => {
+        console.log('[DEBUG MODALE] Click evento:', e.target);
+        const closeBtn = e.target.closest('[data-close-modal]');
+        console.log('[DEBUG MODALE] Bottone chiusura trovato:', closeBtn);
+        
+        if (closeBtn) {
+          const modalOverlay = document.getElementById('modal-overlay');
+          console.log('[DEBUG MODALE] Modal overlay per chiusura:', modalOverlay);
+          
+          if (modalOverlay) {
+            console.log('[DEBUG MODALE] Aggiungo classe hidden per chiusura');
+            console.log('[DEBUG MODALE] Classi prima della chiusura:', modalOverlay.className);
+            modalOverlay.classList.add('hidden');
+            console.log('[DEBUG MODALE] Classi dopo la chiusura:', modalOverlay.className);
+          }
+        }
+      });
+
+      // Chiusura modale tramite HX-Trigger
+      document.body.addEventListener('closeModal', (evt) => {
+        console.log('[DEBUG MODALE] Evento closeModal ricevuto:', evt);
+        const modalOverlay = document.getElementById('modal-overlay');
+        console.log('[DEBUG MODALE] Modal overlay per closeModal:', modalOverlay);
+        
+        if (modalOverlay) {
+          console.log('[DEBUG MODALE] Aggiungo classe hidden per closeModal');
+          console.log('[DEBUG MODALE] Classi prima di closeModal:', modalOverlay.className);
+          modalOverlay.classList.add('hidden');
+          console.log('[DEBUG MODALE] Classi dopo closeModal:', modalOverlay.className);
+        }
+      });
+
+      // Debug iniziale
+      console.log('[DEBUG MODALE] Script caricato');
+      console.log('[DEBUG MODALE] Modal overlay iniziale:', document.getElementById('modal-overlay'));
+    </script>
+
+    <script>
+      htmx.on('htmx:afterRequest', function(evt) {
+        console.log('[HTMX-DEBUG] Richiesta completata:', {
+          url: evt.detail.pathInfo.requestPath,
+          trigger: evt.detail.requestConfig.trigger?.id || 'manual',
+          timestamp: new Date().toISOString(),
+          source: 'HTTP'
+        });
+      });
+    </script>
+
+    {% block scripts %}{% endblock %}
+  </div>
+
+  <!-- Modale globale -->
+  <div id="modal-overlay" class="modal-overlay hidden">
+    <div class="modal-container">
+      <div id="modal-body" class="modal-body"></div>
+    </div>
+  </div>
+
+</body>
+</html>

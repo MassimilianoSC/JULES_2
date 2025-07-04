@@ -1,0 +1,51 @@
+{% extends "base.html" %}
+
+{% block content %}
+<div class="min-h-screen w-full bg-slate-100 flex flex-col items-center py-12 px-2">
+  <div class="w-full max-w-4xl bg-white rounded-2xl shadow-2xl p-8">
+    <h1 class="text-3xl md:text-4xl font-bold text-blue-900 mb-8 text-center tracking-wide">Contatti</h1>
+
+    {% if current_user.role == 'admin' %}
+      <a href="/contatti/new" 
+         class="inline-flex items-center gap-1 rounded-lg bg-blue-600 px-4 py-2 text-sm font-medium text-white shadow hover:bg-blue-700 transition mb-6">
+         + Nuovo
+      </a>
+    {% endif %}
+
+    {% if contacts %}
+    <div id="contatti-list" class="grid gap-4">
+      {% include "contatti/contatti_list_partial.html" %}
+    </div>
+    {% else %}
+    <p class="text-center text-slate-600">Nessun contatto disponibile.</p>
+    {% endif %}
+  </div>
+</div>
+{% endblock content %}
+
+{% block scripts %}
+{{ super() }}
+<!-- Script per le notifiche -->
+<script>
+  document.addEventListener('DOMContentLoaded', function() {
+    console.log("DEBUG: DOMContentLoaded su /contatti");
+    fetch('/notifiche/mark-read/contatto', {method: 'POST', credentials: 'include'})
+      .then(() => {
+        if (document.querySelector('#notifiche-inline')) {
+          htmx.ajax('GET', '/notifiche/inline', {target: '#notifiche-inline', swap: 'outerHTML'});
+        }
+        const contattiBadgeContainer = document.getElementById('nav-contatti-badge-container');
+        if (contattiBadgeContainer) {
+          htmx.trigger(contattiBadgeContainer, 'refreshContattiBadgeEvent');
+        }
+        htmx.trigger(document.body, 'notifications.refresh');
+      });
+  });
+</script>
+
+<!-- Lo script inline per la gestione delle conferme admin è stato rimosso. -->
+<!-- Sarà gestito globalmente da static/js/ui.js -->
+
+<!-- Importazione del gestore per l'eliminazione dei contatti -->
+<script type="module" src="{{ url_for('static', path='js/features/contact-delete.js') }}"></script>
+{% endblock %}

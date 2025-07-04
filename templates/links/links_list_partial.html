@@ -1,0 +1,11 @@
+<div id="links-list" class="grid gap-4">
+  {% if links %}
+    {% for l in links %}
+      {% with l=l, user=current_user %}
+        {% include "links/row_partial.html" %}
+      {% endwith %}
+    {% endfor %}
+  {% else %}
+    <div class="text-gray-500 text-sm px-4 py-2">Nessun link disponibile per la tua filiale.</div>
+  {% endif %}
+</div> 

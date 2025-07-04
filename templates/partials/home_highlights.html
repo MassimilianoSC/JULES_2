@@ -1,0 +1,261 @@
+{% import "components/card.html" as ui %}
+{% from "components/card.html" import pin_btn %}
+
+<script>
+console.log('🏠 [DEBUG-TEMPLATE] Inizio rendering home_highlights.html', {
+  timestamp: new Date().toISOString(),
+  pinned: {{ (pinned if pinned is defined else [])|tojson }},
+  highlights: {{ (highlights|map('dict_to_json_safe')|list if highlights is defined else [])|tojson }},
+  utente: {
+    branch: '{{ user.branch if user is defined and user.branch is defined else "" }}',
+    employmentType: '{{ user.employment_type if user is defined and user.employment_type is defined else "" }}',
+    role: '{{ user.role if user is defined and user.role is defined else "" }}'
+  }
+});
+</script>
+
+<div class="w-full mb-8" id="home-page-highlights">
+  {% set pinned = user.pinned_items or [] %}
+  {% set pinned_ids = pinned | map(attribute='id') | list %}
+  {% set pinned_ids = pinned_ids | map('string') | list %}
+  
+  {# Card Pinnate (NON TOCCARE) #}
+  <div class="mb-8 mt-12">
+    {% if pinned %}
+      <div class="inline-block mb-3 px-6 py-2 rounded-xl bg-pink-100/80 border-2 border-pink-400">
+        <h2 class="text-xl font-bold text-pink-900 text-center flex items-center gap-2">
+          <span>Card pinnate</span>
+          <span class="bg-pink-400 text-white text-xs font-bold px-3 py-1 rounded-full">PIN</span>
+        </h2>
+      </div>
+    {% endif %}
+    <div id="highlights-container" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+      {% for pin in pinned %}
+        {% set h = (highlights | selectattr('object_id', 'equalto', pin.id) | list | first) %}
+        {% if h and h.type != 'news' and h.object_id %}
+          <script>
+          console.log('🏠 [DEBUG-TEMPLATE] Rendering card pinnata:', {
+            timestamp: new Date().toISOString(),
+            highlight: {{ h|dict_to_json_safe|tojson }},
+            pinned: true
+          });
+          </script>
+          {{ ui.render_card(h, true) }}
+        {% endif %}
+      {% endfor %}
+    </div>
+  </div>
+
+  {# --- NEWS (NON TOCCARE) --- #}
+  {# ...presente altrove o gestita separatamente... #}
+
+  {# --- DOCUMENTI --- #}
+  {% set docs = highlights | selectattr('type', 'equalto', 'document') | list %}
+  {% if docs %}
+    <script>
+    console.log('🏠 [DEBUG-TEMPLATE] Rendering sezione documenti:', {
+      timestamp: new Date().toISOString(),
+      count: {{ docs|length }},
+      docs: {{ docs|map('dict_to_json_safe')|list|tojson }}
+    });
+    </script>
+    <div class="mb-6">
+      <div class="inline-block mb-3 px-6 py-2 rounded-xl bg-blue-100/80 section-label-blue max-w-lg" style="width:100%">
+        <h2 class="text-xl font-bold text-blue-900 text-center">
+          Documenti
+          <span class="text-xs font-semibold text-blue-600 bg-blue-100 px-2 py-1 rounded ml-2 align-middle">In evidenza</span>
+        </h2>
+      </div>
+      <div id="documents-section" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {% for h in docs %}
+          {% if h.object_id not in pinned_ids %}
+            <script>
+            console.log('🏠 [DEBUG-TEMPLATE] Rendering card documento:', {
+              timestamp: new Date().toISOString(),
+              highlight: {{ h|dict_to_json_safe|tojson }},
+              pinned: false
+            });
+            </script>
+            <div class="relative bg-blue-50 border-l-4 border-blue-400 rounded-2xl p-3 shadow-sm flex flex-col gap-2 animate-fadein card-animated"
+                 data-item-type="{{ h.type }}"
+                 data-item-id="{{ h.object_id }}"
+                 data-origin="#documents-section">
+              {{ pin_btn(h, {'type': h.type, 'id': h.object_id} in pinned, h.object_id) }}
+              <div class="flex items-center justify-between mb-1">
+                <h3 class="text-base font-semibold text-blue-900 truncate">{{ h.title }}</h3>
+                <span class="text-xs text-blue-500">{{ h.created_at.strftime('%d/%m/%Y') }}</span>
+              </div>
+              <a href="/doc/{{ h.object_id }}/preview" class="mt-1 text-blue-600 hover:text-blue-800 font-medium text-sm transition-colors duration-150">Visualizza documento</a>
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  {# --- DOCUMENTI AI --- #}
+  {% set ai_docs = highlights | selectattr('type', 'equalto', 'ai_news') | list %}
+  {% if ai_docs %}
+    <div class="mb-6">
+      <div class="inline-block mb-3 px-6 py-2 rounded-xl bg-violet-100/80 section-label-violet max-w-lg" style="width:100%">
+        <h2 class="text-xl font-bold text-violet-900 text-center">
+          Risorsa AI
+          <span class="text-xs font-semibold text-violet-600 bg-violet-100 px-2 py-1 rounded ml-2 align-middle">In evidenza</span>
+        </h2>
+      </div>
+      <div id="ai-news-section" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {% for h in ai_docs %}
+          {% if h.object_id not in pinned_ids %}
+            <div class="relative bg-violet-50 border-l-4 border-violet-400 rounded-2xl p-3 shadow-sm flex flex-col gap-2 animate-fadein card-animated"
+                 data-item-type="{{ h.type }}"
+                 data-item-id="{{ h.object_id }}"
+                 data-origin="#ai-news-section">
+              {{ pin_btn(h, {'type': h.type, 'id': h.object_id} in pinned, h.object_id) }}
+              <div class="flex items-center justify-between mb-1">
+                <h3 class="text-base font-semibold text-violet-900 truncate">{{ h.title }}</h3>
+                <span class="text-xs text-violet-500">{{ h.created_at.strftime('%d/%m/%Y') }}</span>
+              </div>
+              {% if h.external_url %}
+                <a href="{{ h.external_url }}" target="_blank" rel="noopener" class="text-violet-600 hover:text-violet-800 font-medium text-sm transition-colors duration-150">Guarda video AI</a>
+              {% elif h.filename %}
+                <a href="/ai-news/{{ h.object_id }}/preview" class="text-violet-600 hover:text-violet-800 font-medium text-sm transition-colors duration-150">Visualizza documento AI</a>
+              {% else %}
+                <span class="text-xs text-violet-400 italic">Nessuna risorsa disponibile</span>
+              {% endif %}
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+
+  {# --- LINK --- #}
+  {% if highlights %}
+    <script>
+    console.log('🏠 [DEBUG-LINK-FLOW] Totale highlights ricevuti:', {{ highlights|length }});
+    
+    {% for highlight in highlights %}
+      {% set h = highlight %}
+      console.log('🏠 [DEBUG-LINK-FLOW] Highlight:', {
+        type: '{{ h.get("type", "") }}',
+        title: '{{ h.get("title", "") }}',
+        branch: '{{ h.get("branch", "") }}',
+        employment_type: '{{ h.get("employment_type", "") }}'
+      });
+    {% endfor %}
+
+    console.log('🏠 [DEBUG-LINK-FLOW] User info:', {
+      branch: '{{ user.get("branch", "") }}',
+      employment_type: '{{ user.get("employment_type", "") }}',
+      role: '{{ user.get("role", "") }}'
+    });
+
+    {% set links = highlights | selectattr('type', 'equalto', 'link') | list %}
+    console.log('🏠 [DEBUG-LINK-FLOW] Link trovati dopo filtro:', {{ links|length }});
+    
+    {% for link in links %}
+      console.log('🏠 [DEBUG-LINK-FLOW] Link filtrato:', {
+        title: '{{ link.get("title", "") }}',
+        branch: '{{ link.get("branch", "") }}',
+        employment_type: '{{ link.get("employment_type", "") }}'
+      });
+    {% endfor %}
+    </script>
+
+    <script>
+    console.log('🏠 [DEBUG-TEMPLATE] Rendering sezione link:', {
+      timestamp: new Date().toISOString(),
+      count: {{ highlights|length }},
+      highlights: {{ highlights|map('dict_to_json_safe')|list|tojson }}
+    });
+    </script>
+    <div class="mb-6">
+      <div class="inline-block mb-3 px-6 py-2 rounded-xl bg-green-100/80 max-w-lg" style="width:100%">
+        <h2 class="text-xl font-bold text-green-900 text-center">
+          Link Utili
+          <span class="text-xs font-semibold text-green-600 bg-green-100 px-2 py-1 rounded ml-2 align-middle">In evidenza</span>
+        </h2>
+      </div>
+      <div id="links-section" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {% for h in highlights %}
+          {% if h.type == 'link' and h.object_id not in pinned_ids %}
+            <script>
+            console.log('🏠 [DEBUG-TEMPLATE] Rendering card link:', {
+              timestamp: new Date().toISOString(),
+              highlight: {{ h|dict_to_json_safe|tojson }},
+              pinned: false
+            });
+            </script>
+            <div class="relative bg-green-50 border-l-4 border-green-400 rounded-2xl p-3 shadow-sm flex flex-col gap-2 animate-fadein card-animated"
+                 data-item-type="{{ h.type }}"
+                 data-item-id="{{ h.object_id }}"
+                 data-origin="#links-section">
+              {{ pin_btn(h, {'type': h.type, 'id': h.object_id} in pinned, h.object_id) }}
+              <div class="flex items-center justify-between mb-1">
+                <h3 class="text-base font-semibold text-green-900 truncate">{{ h.title }}</h3>
+                <span class="text-xs text-green-500">{{ h.created_at.strftime('%d/%m/%Y') }}</span>
+              </div>
+              <a href="{{ h.url }}" target="_blank" class="text-green-700 hover:text-green-900 font-medium text-sm transition-colors duration-150">Apri link</a>
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  {% else %}
+    {{ template_log("[DEBUG TEMPLATE] Nessun highlight ricevuto dal backend") }}
+  {% endif %}
+
+  {# --- CONTATTI --- #}
+  {% set contacts = highlights | selectattr('type', 'equalto', 'contact') | list %}
+  {% if contacts %}
+    <script>
+    console.log('🏠 [DEBUG-TEMPLATE] Rendering sezione contatti:', {
+      timestamp: new Date().toISOString(),
+      count: {{ contacts|length }},
+      contacts: {{ contacts|map('dict_to_json_safe')|list|tojson }}
+    });
+    </script>
+    <div class="mb-6">
+      <div class="inline-block mb-3 px-6 py-2 rounded-xl bg-yellow-100/80 max-w-lg" style="width:100%">
+        <h2 class="text-xl font-bold text-yellow-900 text-center">
+          Contatti
+          <span class="text-xs font-semibold text-yellow-600 bg-yellow-100 px-2 py-1 rounded ml-2 align-middle">In evidenza</span>
+        </h2>
+      </div>
+      <div id="contacts-section" class="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-3 xl:grid-cols-4 gap-6">
+        {% for h in contacts %}
+          {% if h.object_id not in pinned_ids %}
+            <script>
+            console.log('🏠 [DEBUG-TEMPLATE] Rendering card contatto:', {
+              timestamp: new Date().toISOString(),
+              highlight: {{ h|dict_to_json_safe|tojson }},
+              pinned: false
+            });
+            </script>
+            <div class="relative bg-yellow-50 border-l-4 border-yellow-400 rounded-2xl p-3 shadow-sm flex flex-col gap-2 animate-fadein card-animated"
+                 data-item-type="{{ h.type }}"
+                 data-item-id="{{ h.object_id }}"
+                 data-origin="#contacts-section">
+              {{ pin_btn(h, {'type': h.type, 'id': h.object_id} in pinned, h.object_id) }}
+              <div class="flex items-center justify-between mb-1">
+                <h3 class="text-base font-semibold text-yellow-900 truncate">{{ h.title }}</h3>
+                <span class="text-xs text-yellow-500">{{ h.created_at.strftime('%d/%m/%Y') }}</span>
+              </div>
+              {% if h.email %}<div class="text-yellow-800 text-sm">Email: <a href="mailto:{{ h.email }}" class="text-yellow-700 hover:text-yellow-900 font-medium">{{ h.email }}</a></div>{% endif %}
+              {% if h.phone %}<div class="text-yellow-800 text-sm">Telefono: <span>{{ h.phone }}</span></div>{% endif %}
+              <div class="text-yellow-800 text-sm">BU: {{ h.bu or '-' }}</div>
+              <div class="text-yellow-800 text-sm">Team: {{ h.team or '-' }}</div>
+              <div class="text-yellow-800 text-sm">Filiale: {{ h.work_branch or '-' }}</div>
+            </div>
+          {% endif %}
+        {% endfor %}
+      </div>
+    </div>
+  {% endif %}
+</div>
+
+<script>
+console.log('🏠 [DEBUG-TEMPLATE] Fine rendering home_highlights.html', {
+  timestamp: new Date().toISOString()
+});
+</script>

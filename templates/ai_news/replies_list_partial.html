@@ -1,0 +1,24 @@
+{% for reply_item in replies %}
+  {# Usiamo il partial _comment_item, passando 'reply_item' come 'comment'.
+     Assicurarsi che news_id e user siano disponibili nel contesto.
+     Potrebbe essere necessario adattare _comment_item.html se la struttura di una 'reply'
+     è significativamente diversa da un 'comment' o se mancano campi attesi (es. replies_count per una reply).
+     Per ora, assumiamo che la struttura sia compatibile abbastanza.
+  #}
+  <div class="ml-8 border-l-2 border-gray-200 pl-4 my-2" id="comment-{{ reply_item._id }}"> {# Manteniamo un ID per la reply, ma usiamo la logica di _comment_item #}
+    {% include "ai_news/_comment_item.html" with context comment=reply_item news_id=news_id user=user %}
+  </div>
+{% endfor %}
+
+{% if has_more %}
+<div class="text-center py-2">
+    <button 
+        class="text-sm text-blue-600 hover:text-blue-800"
+        hx-get="/api/ai-news/{{ news_id }}/comments/{{ comment_id }}/replies?page={{ next_page }}"
+        hx-target="this"
+        hx-swap="outerHTML"
+    >
+        Carica altre risposte
+    </button>
+</div>
+{% endif %} 

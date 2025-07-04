@@ -1,0 +1,67 @@
+{% set user = user or current_user %}
+{% macro news_row(n, user=None) %}
+<div id="news-{{ n._id|string }}" class="p-4 bg-blue-50 border-l-4 border-blue-400 rounded-2xl shadow-sm">
+  <div class="flex flex-row justify-between">
+    <div class="flex-1">
+      <h3 class="text-xl font-bold text-gray-900 mb-2">{{ n.title }}</h3>
+      <div class="prose max-w-none text-gray-800 mb-4">
+        {{ n.content | safe }}
+      </div>
+      <div class="text-sm text-gray-600">
+        Pubblicato il {{ n.created_at.strftime("%d/%m/%Y") if n.created_at else "?" }}
+      </div>
+    </div>
+    <div class="flex flex-col items-end w-1/3 pl-8 mt-4 md:mt-0">
+      <div class="text-base font-bold text-slate-700 mb-1">Destinatario</div>
+      <div class="text-sm text-gray-700 bg-blue-100 rounded-lg px-4 py-2">
+        Filiale: {{ 'Tutte' if n.branch == '*' else n.branch or '?' }}<br>
+        {% set tipo = n.employment_type %}
+        Tipologia:
+        {% if tipo is string %}
+          {{ {
+            "TD": "Tempo Determinato",
+            "TI": "Tempo Indeterminato",
+            "AP": "Apprendistato",
+            "CO": "Collaborazione",
+            "*": "Tutte"
+          }[tipo] }}
+        {% elif tipo is sequence %}
+          {% for t in tipo %}
+            {{ {
+              "TD": "Tempo Determinato",
+              "TI": "Tempo Indeterminato",
+              "AP": "Apprendistato",
+              "CO": "Collaborazione",
+              "*": "Tutte"
+            }[t] }}{% if not loop.last %}, {% endif %}
+          {% endfor %}
+        {% else %}
+          ?
+        {% endif %}
+      </div>
+    </div>
+  </div>
+  {% if user and user.role == "admin" %}
+  <div class="flex gap-2 mt-2 md:mt-0">
+    <button
+      hx-get="/news/{{ n._id }}/edit"
+      hx-target="#modal-body"
+      hx-swap="innerHTML"
+      class="inline-flex items-center gap-1 rounded-lg bg-blue-100 px-4 py-2 text-sm font-medium text-blue-800 shadow hover:bg-blue-200 transition">
+      Modifica
+    </button>
+    <form hx-delete="/news/{{ n._id }}"
+          hx-target="#news-{{ n._id|string }}"
+          hx-swap="outerHTML" {# Manteniamo hx-swap per fallback se WS fallisce per l'admin, outerHTML è più sicuro di delete per sostituire o rimuovere #}
+          class="inline">
+      <button type="button"
+              data-news-title="{{ n.title }}"
+              class="btn-delete-news inline-flex items-center gap-1 rounded-lg bg-rose-100 px-4 py-2 text-sm font-medium text-rose-700 shadow hover:bg-rose-200 transition">
+        Elimina
+      </button>
+    </form>
+  </div>
+  {% endif %}
+</div>
+{# Script module rimosso da qui. Sarà gestito da news-delete.js e gestori globali. #}
+{% endmacro %}
