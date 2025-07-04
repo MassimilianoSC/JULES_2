@@ -34,7 +34,20 @@ async def create_contact(
 ):
     db = request.app.state.db
     employment_type_list = [employment_type] if isinstance(employment_type, str) else (employment_type or [])
-    result = await db.contatti.insert_one({
+    db = request.app.state.db
+    # Assicura che employment_type sia una lista, come in links.py
+    # Se arriva una stringa singola, la mettiamo in una lista.
+    # Se è già una lista (es. da un form con multiple select), usiamo quella.
+    # Se è None o vuota, la trattiamo come una lista vuota per coerenza.
+    if isinstance(employment_type, str):
+        employment_type_list = [employment_type] if employment_type else []
+    elif isinstance(employment_type, list):
+        employment_type_list = employment_type
+    else:
+        employment_type_list = [] # Default a lista vuota se non fornito o tipo inatteso
+
+    # 1. Operazione DB
+    contact_data = {
         "name": name.strip(),
         "email": email.strip(),
         "phone": (phone or "").strip(),
@@ -45,14 +58,52 @@ async def create_contact(
         "work_branch": work_branch,
         "show_on_home": bool(show_on_home),
         "created_at": datetime.utcnow()
-    })
-    new_id = result.inserted_id
+    }
+    result = await db.contatti.insert_one(contact_data)
+    new_id = str(result.inserted_id)
+
+    # 2. Notifica nel DB per badge
+    await crea_notifica(
+        request=request,
+        tipo="contatto",
+        titolo=f"Nuovo contatto aggiunto: {name.strip()}", # Titolo più descrittivo come in links
+        branch=branch,
+        id_risorsa=new_id,
+        employment_type=employment_type_list,
+        source_user_id=str(current_user["_id"]) # Aggiunto source_user_id come in links
+    )
+
+    # 3. Toast notification
+    payload_toast = create_action_notification_payload(
+        'create',
+        'contatto',
+        name.strip(),
+        str(current_user["_id"])
+    )
+    await broadcast_message(
+        payload_toast,
+        branch=branch,
+        employment_type=employment_type_list, # Usare la lista
+        exclude_user_id=str(current_user["_id"])
+    )
+
+    # 4. Broadcast evento risorsa
+    await broadcast_resource_event(
+        event="add",
+        item_type="contact",
+        item_id=new_id,
+        user_id=str(current_user["_id"]),
+        title=name.strip(), # Aggiunto title come in links (anche se non specificato se db è necessario qui)
+        db=db # Aggiunto db come in links
+    )
+
+    # 5. Aggiornamento highlights (se necessario)
     if show_on_home:
         highlight_data = {
             "type": "contact",
-            "object_id": str(new_id),
+            "object_id": new_id,
             "title": name.strip(),
-            "created_at": datetime.utcnow(),
+            "created_at": contact_data["created_at"], # Usa la stessa datetime di creazione
             "branch": branch,
             "employment_type": employment_type_list,
             "email": email.strip(),
@@ -61,65 +112,27 @@ async def create_contact(
             "team": (team or "").strip() or None,
             "work_branch": work_branch
         }
-        print("Salvo in home_highlights (creazione):", highlight_data)
-        await db.home_highlights.update_one(
-            {"type": "contact", "object_id": str(new_id)},
-            {"$set": highlight_data},
+        await db.home_highlights.update_one( # Usare update_one con upsert=True o insert_one
+            {"type": "contact", "object_id": new_id}, # Criterio per l'upsert
+            {"$set": highlight_data}, # Dati da inserire/aggiornare
             upsert=True
         )
-        # --- AGGIUNTA BROADCAST HIGHLIGHT ---
-        try:
-            payload_highlight = {
-                "type": "refresh_home_highlights",
-                # Includiamo branch e employment_type per il filtraggio nel broadcast
-                # Questi verranno usati da ws_broadcast.py se il tipo è refresh_home_highlights
-                "data": {
-                    "branch": branch,
-                    "employment_type": employment_type_list
-                }
+        payload_highlight = {
+            "type": "refresh_home_highlights",
+            "data": {
+                "branch": branch,
+                "employment_type": employment_type_list
             }
-            # Passiamo branch e employment_type anche come argomenti diretti a broadcast_message
-            # per assicurarci che ws_broadcast li usi per filtrare i destinatari.
-            await broadcast_message(payload_highlight, branch=branch, employment_type=employment_type_list)
-        except Exception as e:
-            print("[WebSocket] Errore broadcast su update_contact_highlight:", e)
-        # --- FINE AGGIUNTA ---
-    await crea_notifica(
-        request=request,
-        tipo="contatto",
-        titolo=name.strip(),
-        branch=branch,
-        id_risorsa=str(new_id),
-        employment_type=employment_type_list
-    )
+        }
+        await broadcast_message(payload_highlight, branch=branch, employment_type=employment_type_list)
 
-    # 📡 BROADCAST a tutti gli utenti
-    u = request.state.user
-    await broadcast_resource_event(
-        event="add",
-        item_type="contact",
-        item_id=str(new_id),
-        user_id=str(u["_id"]),
-    )
-
-    # 1. Notifica WebSocket per lo staff
-    print(f"[DEBUG] Creazione notifica per contatto '{name}' da utente {current_user['_id']}")
-    payload = create_action_notification_payload('create', 'contatto', name.strip(), str(current_user["_id"]))
-    print(f"[DEBUG] Payload notifica: {payload}")
-    await broadcast_message(payload, branch=branch, employment_type=employment_type, exclude_user_id=str(current_user["_id"]))
-    print(f"[DEBUG] Broadcast completato")
-
-    # 2. Conferma per l'admin
-    print(f"[DEBUG] Creazione conferma admin")
+    # 6. Risposta con conferma admin
     resp = Response(status_code=200)
-    # Prima mostra la conferma
     resp.headers["HX-Trigger"] = create_admin_confirmation_trigger('create', name.strip())
-    # Poi chiudi la modale e fai il redirect
     resp.headers["HX-Trigger-After-Settle"] = json.dumps({
         "closeModal": "true",
-        "redirectToContatti": "/contatti"
+        "redirectToContatti": "/contatti" # Allineato con la richiesta originale per i contatti
     })
-    print(f"[DEBUG] Headers risposta: {dict(resp.headers)}")
     return resp
 
 @contatti_router.get("/contatti", response_class=HTMLResponse)
@@ -213,62 +226,123 @@ async def edit_contact_form(
         }
     )
 
-@contatti_router.post("/contatti/{contact_id}/edit")
-async def edit_contact_submit(request: Request, contact_id: str, user: dict = Depends(get_current_user)):
-    form = await request.form()
+@contatti_router.post("/contatti/{contact_id}/edit", dependencies=[Depends(require_admin)])
+async def edit_contact_submit(
+    request: Request,
+    contact_id: str,
+    name: str = Form(...),
+    email: str = Form(...),
+    phone: str = Form(None),
+    bu: str = Form(None),
+    team: str = Form(None),
+    branch: str = Form(...),
+    employment_type: list[str] = Form(...), # Aspetta una lista di stringhe
+    work_branch: str = Form(None),
+    show_on_home: bool = Form(False),
+    current_user: dict = Depends(get_current_user) # Rinominato user a current_user per coerenza
+):
     db = request.app.state.db
-    
-    name = form.get("name", "").strip()
-    branch = form.get("branch", "").strip()
-    employment_type_list = form.getlist("employment_type")
-    
-    # Aggiorna il contatto nel DB
+
+    # employment_type arriva già come list[str] da Form(...)
+    # Non serve la conversione vista in create_contact se il form invia correttamente
+    # Assicuriamoci che sia sempre una lista per coerenza con il modello dati
+    employment_type_list = employment_type if isinstance(employment_type, list) else [employment_type]
+
+
+    # 1. Operazione DB: Aggiorna il contatto
+    update_data = {
+        "name": name.strip(),
+        "email": email.strip(),
+        "phone": (phone or "").strip(),
+        "bu": (bu or "").strip() or None,
+        "team": (team or "").strip() or None,
+        "branch": branch,
+        "employment_type": employment_type_list,
+        "work_branch": (work_branch or "").strip() or None,
+        "show_on_home": bool(show_on_home),
+        "updated_at": datetime.utcnow()
+    }
     await db.contatti.update_one(
         {"_id": ObjectId(contact_id)},
-        {"$set": {
-            "name": name,
-            "branch": branch,
-            "employment_type": employment_type_list,
-            "phone": form.get("phone", "").strip(),
-            "email": form.get("email", "").strip(),
-            "role": form.get("role", "").strip()
-        }}
+        {"$set": update_data}
     )
 
-    # 1. Notifica mirata ai destinatari
-    payload_toast = {
-        "type": "new_notification",
-        "data": {
-            "id": str(contact_id),
-            "message": f"Il contatto è stato modificato: {name.strip()}",
-            "tipo": "contatto",
-            "source_user_id": str(current_user["_id"])
-        }
-    }
+    # 2. Toast notification (come in links.py)
+    payload_toast = create_action_notification_payload(
+        'update',
+        'contatto',
+        name.strip(),
+        str(current_user["_id"])
+    )
     await broadcast_message(
-        payload=payload_toast,
+        payload_toast,
         branch=branch,
         employment_type=employment_type_list,
-        exclude_user_id=str(user["_id"])
+        exclude_user_id=str(current_user["_id"])
     )
 
-    # 2. Aggiornamento highlights per tutti
-    await broadcast_resource_event(event="update", item_type="contact", item_id=contact_id, user_id=str(user["_id"]))
+    # 3. Aggiornamento highlights (se necessario)
+    # Recupera il contatto aggiornato per avere i dati corretti per home_highlights
+    updated_contact_for_highlight = await db.contatti.find_one({"_id": ObjectId(contact_id)})
 
-    # 3. Conferma per l'admin via HX-Trigger
-    updated = await db.contatti.find_one({"_id": ObjectId(contact_id)})
+    if show_on_home:
+        highlight_data = {
+            "type": "contact",
+            "object_id": contact_id, # E' gia' una stringa
+            "title": updated_contact_for_highlight["name"],
+            "created_at": updated_contact_for_highlight.get("created_at", datetime.utcnow()), # Mantieni created_at originale se esiste
+            "branch": updated_contact_for_highlight["branch"],
+            "employment_type": updated_contact_for_highlight["employment_type"],
+            "email": updated_contact_for_highlight["email"],
+            "phone": updated_contact_for_highlight["phone"],
+            "bu": updated_contact_for_highlight["bu"],
+            "team": updated_contact_for_highlight["team"],
+            "work_branch": updated_contact_for_highlight["work_branch"]
+        }
+        await db.home_highlights.update_one(
+            {"type": "contact", "object_id": contact_id},
+            {"$set": highlight_data},
+            upsert=True
+        )
+        payload_highlight_refresh = {
+            "type": "refresh_home_highlights",
+            "data": {"branch": branch, "employment_type": employment_type_list}
+        }
+        await broadcast_message(payload_highlight_refresh, branch=branch, employment_type=employment_type_list)
+    else:
+        # Se show_on_home è False, rimuovi da home_highlights
+        delete_result = await db.home_highlights.delete_one({"type": "contact", "object_id": contact_id})
+        if delete_result.deleted_count > 0: # Era in home ed è stato rimosso
+            # Invia broadcast per refresh se effettivamente rimosso
+            payload_highlight_refresh = {
+                "type": "refresh_home_highlights",
+                # Qui dovremmo idealmente usare i branch/emp_type *prima* della modifica
+                # se sono cambiati, per notificare correttamente chi lo vedeva prima.
+                # Per semplicità, usiamo quelli attuali come in links.py.
+                "data": {"branch": branch, "employment_type": employment_type_list}
+            }
+            await broadcast_message(payload_highlight_refresh, branch=branch, employment_type=employment_type_list)
+
+    # 4. Broadcast evento risorsa
+    await broadcast_resource_event(
+        event="update",
+        item_type="contact",
+        item_id=contact_id,
+        user_id=str(current_user["_id"]),
+        # title=name.strip(), # Opzionale, ma per coerenza con create e links.py
+        # db=db # Opzionale, ma per coerenza con create e links.py
+    )
+
+    # 5. Risposta con la riga aggiornata e conferma admin
+    # Recupera il contatto finale per il template (potrebbe essere ridondante se updated_contact_for_highlight è sufficiente)
+    final_updated_contact = await db.contatti.find_one({"_id": ObjectId(contact_id)})
     resp = request.app.state.templates.TemplateResponse(
-        "contatti/contatti_row_partial.html",
-        {"request": request, "contact": updated, "current_user": user}
+        "contatti/contatti_row_partial.html", # Assumendo che questo template esista e funzioni come links_row_partial.html
+        {"request": request, "contact": final_updated_contact, "current_user": current_user}
     )
-
-    # Allineamento con il sistema di conferma admin dei Link
-    # Usiamo create_admin_confirmation_trigger invece di un toast per l'admin.
-    # Aggiungiamo closeModal direttamente nel payload del trigger gestito globalmente.
-    admin_confirmation_payload = json.loads(create_admin_confirmation_trigger('update', name))
-    admin_confirmation_payload["closeModal"] = True # Aggiungiamo closeModal qui
-
-    resp.headers["HX-Trigger"] = json.dumps(admin_confirmation_payload)
+    # HX-Trigger per la conferma admin (include closeModal: true)
+    resp.headers["HX-Trigger"] = create_admin_confirmation_trigger('update', name.strip())
+    # Non serve HX-Trigger-After-Settle se closeModal è gestito nel payload di create_admin_confirmation_trigger
 
     return resp
 
@@ -379,46 +453,62 @@ async def delete_contact(
 
     # 2. Elimina il contatto
     await db.contatti.delete_one({"_id": ObjectId(contact_id)})
-    
-    # 3. Elimina da home_highlights se presente
-    await db.home_highlights.delete_one({
-        "type": "contact",
-        "object_id": str(contact_id)
-    })
 
-    # 4. Notifica WebSocket per lo staff (come nella creazione)
-    print(f"[DEBUG] Preparazione notifica eliminazione per '{contact['name']}'")
-    payload = create_action_notification_payload(
+    # 3. Elimina le notifiche associate a questo contatto (come in links.py)
+    # Questo aiuta a mantenere il conteggio dei badge accurato.
+    await db.notifiche.delete_many({"id_risorsa": contact_id, "tipo": "contatto"})
+    
+    # Recupera i dettagli necessari prima che 'contact' non sia più disponibile
+    contact_name = contact.get('name', 'Contatto sconosciuto')
+    contact_branch = contact.get('branch', '*') # Default a '*' se non specificato
+    contact_employment_type = contact.get('employment_type', ['*']) # Default a ['*']
+    was_on_home = contact.get("show_on_home", False)
+
+    # 4. Toast notification
+    payload_toast = create_action_notification_payload(
         'delete', 
         'contatto', 
-        contact["name"], 
+        contact_name,
         str(current_user["_id"])
     )
-    print(f"[DEBUG] Payload notifica: {payload}")
     await broadcast_message(
-        payload, 
-        branch=contact["branch"],
-        employment_type=contact["employment_type"],
+        payload_toast,
+        branch=contact_branch,
+        employment_type=contact_employment_type,
         exclude_user_id=str(current_user["_id"])
     )
-    print(f"[DEBUG] Notifica inviata")
 
-    # 5. Broadcast dell'evento per aggiornare UI
+    # 5. Elimina da home_highlights se presente
+    await db.home_highlights.delete_one({
+        "type": "contact", # Assicurati che type sia corretto
+        "object_id": contact_id # contact_id è già una stringa
+    })
+
+    # 6. Broadcast refresh_home_highlights (se era in home)
+    if was_on_home:
+        payload_highlight_refresh = {
+            "type": "refresh_home_highlights",
+            "data": { # Dati per il broadcast mirato
+                "branch": contact_branch,
+                "employment_type": contact_employment_type
+            }
+        }
+        await broadcast_message(
+            payload_highlight_refresh,
+            branch=contact_branch, # Filtra il broadcast per chi poteva vedere il contatto
+            employment_type=contact_employment_type
+        )
+
+    # 7. Broadcast evento risorsa
     await broadcast_resource_event(
         event="delete",
         item_type="contact",
-        item_id=str(contact_id),
+        item_id=contact_id, # E' già una stringa
         user_id=str(current_user["_id"])
+        # title e db non sono strettamente necessari qui per delete come in links.py
     )
 
-    # 6. Se era in home, aggiorna la home
-    if contact.get("show_on_home"):
-        try:
-            await broadcast_message({"type": "refresh_home_highlights"})
-        except Exception as e:
-            print("[WebSocket] Errore broadcast su delete_contact_highlight:", e)
-
-    # 7. Conferma per l'admin
+    # 8. Conferma per l'admin
     response = Response(status_code=200)
     admin_trigger = create_admin_confirmation_trigger(
         'delete',
